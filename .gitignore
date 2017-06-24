@@ -20,3 +20,6 @@ HTML
 API_Reference_CHM.shfbproj_jp
 .DS_Store
 .vs
+
+# Ignore Jetbrains IDE files
+.idea
