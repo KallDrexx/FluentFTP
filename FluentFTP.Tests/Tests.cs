@@ -11,9 +11,11 @@ using System.Linq;
 using System.Threading.Tasks;
 #endif
 using System.IO.Compression;
+using System.Reflection;
 using System.Text;
 using FluentFTP.Proxy;
 using System.Security.Authentication;
+using Newtonsoft.Json;
 
 namespace Tests {
 	class Tests {
@@ -35,150 +37,77 @@ namespace Tests {
 
 			FtpTrace.LogIP = false;
 			FtpTrace.LogUserName = false;
+			FtpTrace.LogToConsole = true;
 
+			var json = File.ReadAllText("settings.json");
+			var settings = JsonConvert.DeserializeObject<TestSettings>(json);
+			m_host = settings.Host;
+			m_user = settings.Username;
+			m_pass = settings.Password;
+
+#if !CORE
 			FtpTrace.AddListener(new ConsoleTraceListener());
 			FtpTrace.AddListener(new TextWriterTraceListener(@"C:\log_file.txt"));
-
-			try {
-
-				/*foreach (int i in connectionTypes) {
-					using (FtpClient cl = new FtpClient()) {
-						cl.Credentials = new NetworkCredential(m_user, m_pass);
-						cl.Host = m_host;
-						cl.EncryptionMode = FtpEncryptionMode.None;
-						cl.ValidateCertificate += new FtpSslValidation(cl_ValidateCertificate);
-						cl.DataConnectionType = (FtpDataConnectionType)i;
-						//cl.Encoding = System.Text.Encoding.Default;
-						cl.Connect();
-						Upload(cl);
-						Download(cl);
-						Delete(cl);
-					}
-				}*/
-
-
-
-				//--------------------------------
-				// MISC
-				//--------------------------------
-				//StreamResponses();
-				//TestServer();
-				//TestManualEncoding();
-				//TestServer();
-				//TestDisposeWithMultipleThreads();
-				//TestMODCOMP_PWD_Parser();
-				//TestDispose();
-				//TestHash();
-				//TestReset();
-				//TestUTF8();
-				//TestDirectoryWithDots();
-				//TestNameListing();
-				//TestNameListingFTPS();
-				// TestFileZillaKick();
-				//TestUnixList();
-				//TestNetBSDServer();
-				// TestConnectionFailure();
-				//TestFtpPath();
-				//TestListPath();
-				//TestListPathWithHttp11Proxy();
-				//TestFileExists();
-				//TestDeleteDirectory();
-				//TestMoveFiles();
-
-
-
-
-				//--------------------------------
-				// PARSING
-				//--------------------------------
-				//TestUnixListParser();
-				//TestIISParser();
-				//TestOpenVMSParser();
-
-
-
-				//--------------------------------
-				// FILE LISTING
-				//--------------------------------
-				//TestGetObjectInfo();
-				//TestGetListing();
-				TestGetListingCCC();
-				//TestGetMachineListing();
-				//GetPublicFTPServerListing();
-				//TestListSpacedPath();
-				//TestFilePermissions();
-
-
-
-				//--------------------------------
-				// UPLOAD / DOWNLOAD
-				//--------------------------------
-				//TestUploadDownloadFile();
-				//TestUploadDownloadManyFiles();
-				//TestUploadDownloadZeroLenFile();
-				//TestUploadDownloadManyFiles2();
-				//TestUploadDownloadFile_UTF();
-				//TestUploadDownloadFile_ANSI();
-
-
-
-
-
-
-
-                //Async Tests
-#if (CORE || NETFX45)
-				TestAsyncMethods();
 #endif
 
-			} catch (Exception ex) {
-				FtpTrace.WriteLine(ex.ToString());
+			if (!settings.TestsToExecute.Any())
+			{
+				FtpTrace.WriteLine("No tests specified to run");
+				return;
+			}
+			
+			var testMethods = typeof(Tests).GetTypeInfo()
+				.GetMethods(BindingFlags.Static | BindingFlags.NonPublic)
+				.Where(x => x.Name.StartsWith("Test"))
+				.Where(x => x.GetParameters().Length == 0)
+				.ToArray();
+
+			foreach (var testName in settings.TestsToExecute)
+			{
+				var testMethod = testMethods.FirstOrDefault(x => x.Name == "Test" + testName);
+				if (testMethod == null)
+				{
+					FtpTrace.WriteLine("Could not find method for test: " + testName);
+					continue;
+				}
+				
+				FtpTrace.WriteLine("Executing test: " + testName);
+				testMethod.Invoke(null, null);
 			}
 
 			FtpTrace.WriteLine("--DONE--");
-			// Console.ReadKey();
 		}
 
 #if (CORE || NETFX45)
 		private static void TestAsyncMethods() {
 			FtpTrace.WriteLine("Running Async Tests");
-			List<Task> tasks = new List<Task>() {
-			        TestListPathAsync(),
-			        StreamResponsesAsync(),
-			        TestGetObjectInfoAsync(),
-			        TestHashAsync(),
-			        TestUploadDownloadFileAsync(),
-			        TestUploadDownloadManyFilesAsync(),
-			        TestUploadDownloadManyFiles2Async()
-			    };
+			
+			var task = Task.Run(async () =>
+			{
+				await TestListPathAsync();
+				await StreamResponsesAsync();
+				await TestGetObjectInfoAsync();
+				await TestHashAsync();
+				await TestUploadDownloadFileAsync();
+				await TestUploadDownloadManyFilesAsync();
+				await TestUploadDownloadManyFiles2Async();
+			});
 
-			Task.WhenAll(tasks).ContinueWith(t => {
-				Console.Write("Async Tests Completed: ");
-				if (t.IsFaulted) {
-					var exceptions = FlattenExceptions(t.Exception);
-					FtpTrace.WriteLine("With {0} Error{1}.", exceptions.Length, exceptions.Length > 1 ? "s" : "");
-					for (int i = 0; i > exceptions.Length; i++) {
-						var ex = exceptions[i];
-						FtpTrace.WriteLine("\nException {0}: {1} - {2}", i, ex.GetType().Name, ex.Message);
-						FtpTrace.WriteLine(ex.StackTrace);
-					}
-				} else {
-					FtpTrace.WriteLine("Successfully");
-				}
-			}).Wait();
+			while (!task.IsCompleted)
+			{
+				Thread.Sleep(100);
+			}
+
+			if (task.IsFaulted)
+			{
+				FtpTrace.WriteLine("Async Tests Failed: " + task.Exception.ToString());
+			}
+			else
+			{
+				FtpTrace.WriteLine("Async Tests Completed");
+			}
 		}
 
-	    static Exception[] FlattenExceptions(AggregateException aggEx) {
-	        AggregateException flattened = aggEx.Flatten();
-	        return flattened.InnerExceptions.Select(e => GetInnerMostException(e)).ToArray();
-	    }
-
-	    static Exception GetInnerMostException(Exception ex) {
-            if (ex.InnerException != null)
-                return GetInnerMostException(ex.InnerException);
-            
-            return ex;
-	    }
 #endif
 
 
@@ -275,14 +204,14 @@ namespace Tests {
                 {
                     FtpReply r = s.CommandStatus;
 
-                    FtpTrace.WriteLine();
+                    FtpTrace.WriteLine("");
                     FtpTrace.WriteLine("Response to STOR:");
                     FtpTrace.WriteLine("Code: "+ r.Code);
                     FtpTrace.WriteLine("Message: "+ r.Message);
                     FtpTrace.WriteLine("Informational: "+ r.InfoMessages);
 
                     r = s.Close();
-                    FtpTrace.WriteLine();
+                    FtpTrace.WriteLine("");
                     FtpTrace.WriteLine("Response after close:");
                     FtpTrace.WriteLine("Code: "+ r.Code);
                     FtpTrace.WriteLine("Message: "+ r.Message);
@@ -299,7 +228,7 @@ namespace Tests {
 
 				if (!cl.FileExists("test.txt")) {
 					using (Stream s = cl.OpenWrite("test.txt")) {
-						s.Close();
+						s.Dispose();
 					}
 				}
 
@@ -339,7 +268,7 @@ namespace Tests {
 
                 cl.Host = m_host;
                 cl.Credentials = new NetworkCredential(m_user, m_pass);
-                cl.Encoding = Encoding.Default;
+                cl.Encoding = Encoding.GetEncoding(0);
 
                 item = await cl.GetObjectInfoAsync("/Examples/OpenRead.cs");
                 FtpTrace.WriteLine(item.ToString());
@@ -351,10 +280,10 @@ namespace Tests {
 			using (FtpClient cl = new FtpClient()) {
 				cl.Host = m_host;
 				cl.Credentials = new NetworkCredential(m_user, m_pass);
-				cl.Encoding = Encoding.Default;
+				cl.Encoding = Encoding.GetEncoding(0);
 
 				using (Stream s = cl.OpenWrite("test.txt")) {
-					s.Close();
+					s.Dispose();
 				}
 			}
 		}
@@ -437,7 +366,7 @@ namespace Tests {
                             }
                             finally
                             {
-                                FtpTrace.WriteLine();
+                                FtpTrace.WriteLine("");
                             }
                         }
                         break;
@@ -516,13 +445,13 @@ namespace Tests {
 				client.Credentials = new NetworkCredential(m_user, m_pass);
 				client.Host = m_host;
 				client.EncryptionMode = FtpEncryptionMode.Explicit;
-				client.PlainTextEncryption = true;
+				client.EncryptionMode = FtpEncryptionMode.None;
 				client.SslProtocols = SslProtocols.Tls;
 				client.ValidateCertificate += new FtpSslValidation(OnValidateCertificate);
 				client.Connect();
 
 				foreach (FtpListItem i in client.GetListing("/public_html/temp/", FtpListOption.ForceList | FtpListOption.Recursive)) {
-					//FtpTrace.WriteLine(i);
+					FtpTrace.WriteLine(i);
 				}
 
 				// 100 K file
@@ -744,7 +673,7 @@ namespace Tests {
 				cl.Connect();
 
 				using (Stream istream = cl.OpenRead("LICENSE.TXT", 10)) {
-					istream.Close();
+					istream.Dispose();
 				}
 			}
 		}
@@ -899,8 +828,8 @@ namespace Tests {
 						ostream.Write(buf, 0, read);
 					}
 				} finally {
-					ostream.Close();
-					istream.Close();
+					ostream.Dispose();
+					istream.Dispose();
 				}
 
 				if (cl.HashAlgorithms != FtpHashAlgorithm.NONE) {
@@ -953,7 +882,7 @@ namespace Tests {
 				try {
 					while (s.Read(buf, 0, buf.Length) > 0) ;
 				} finally {
-					s.Close();
+					s.Dispose();
 				}
 			}
 		}
@@ -986,9 +915,9 @@ namespace Tests {
 				cl.InternetProtocolVersions = FtpIpVersion.ANY;
 
 				using (Stream ostream = cl.OpenWrite(filename)) {
-					StreamWriter writer = new StreamWriter(filename);
+					StreamWriter writer = new StreamWriter(ostream);
 					writer.WriteLine(filename);
-					writer.Close();
+					writer.Dispose();
 				}
 			}
 		}
@@ -1165,7 +1094,7 @@ namespace Tests {
                 await cl.ConnectAsync();
 
                 // upload many
-                await cl.UploadFilesAsync(new string[] { @"D:\Drivers\test\file0.exe", @"D:\Drivers\test\file1.exe", @"D:\Drivers\test\file2.exe", @"D:\Drivers\test\file3.exe", @"D:\Drivers\test\file4.exe" }, "/public_html/temp/", false);
+                await cl.UploadFilesAsync(new string[] { @"D:\Drivers\test\file0.exe", @"D:\Drivers\test\file1.exe", @"D:\Drivers\test\file2.exe", @"D:\Drivers\test\file3.exe", @"D:\Drivers\test\file4.exe" }, "/public_html/temp/", FtpExists.Skip);
 
                 // download many
                 await cl.DownloadFilesAsync(@"D:\Drivers\test\", new string[] { @"/public_html/temp/file0.exe", @"/public_html/temp/file1.exe", @"/public_html/temp/file2.exe", @"/public_html/temp/file3.exe", @"/public_html/temp/file4.exe" }, false);

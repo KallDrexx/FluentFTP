@@ -153,6 +153,17 @@ namespace FluentFTP {
             Write(eventType, message.ToString());
         }
 
+	    /// <summary>
+	    /// Write to the TraceListeners
+	    /// </summary>
+	    /// <param name="eventType">The type of tracing event</param>
+	    /// <param name="message">The message to write</param>
+	    public static void WriteLine(string template, params object[] args)
+	    {
+		    var message = string.Format(template, args);
+		    Write(FtpTraceLevel.Verbose, message);
+	    }
+
         /// <summary>
         /// Write to the TraceListeners, adding an automatic prefix to the message based on the `eventType`
         /// </summary>
@@ -182,9 +193,6 @@ namespace FluentFTP {
         /// <param name="message">A formattable string to write</param>
         public static void Write(FtpTraceLevel eventType, string message) {
 #if CORE
-#if DEBUG
-            Debug.WriteLine(message);
-#else
             if (m_LogToConsole) {
                 Console.WriteLine(message);
             }
@@ -192,7 +200,7 @@ namespace FluentFTP {
                 File.AppendAllText(m_LogToFile, message + "\n");
             }
 #endif
-#elif !CORE
+#if !CORE
             var diagTraceLvl = TraceLevelTranslation(eventType);
 			if (m_prefix) {
 
